@@ -5,25 +5,25 @@ Your awesome Distance Vector router for CS 168
 import sim.api as api
 import sim.basics as basics
 
-
-# We define infinity as a distance of 16.
-INFINITY = 16
-
 # For accessing a routes own maps
 # Stored as -1 so that we can pass poisoned routes around
 INSTANCE = -1
-
+# According to spec, we should remember a route for at least 15 seconds
+TIME_TO_REMEMBER_ROUTE = 15
+# We define infinity as a distance of 16.
+INFINITY = 16
 # Constants
 DESTINATION_NOT_FOUND = 'DESTINATION_NOT_FOUND'
-
-# Keys into route dictionary
+# Keys
 kCost = 'cost'
-
-# Abstractions for mapping
-# Didn't really feel like making another class
 kDistance = 'kDistance'
 kNextHop = 'kNextHop'
 kTime = 'kTime'
+
+"""
+Mapping abstraction
+Very C-Like, idk why I did it like this.
+"""
 def m_mapping(distance, next_hop):
     return {
         kDistance : distance,
@@ -38,6 +38,9 @@ def m_time(mapping):
     return mapping[kTime]
 def m_update_time(mapping):
     mapping[kTime] = api.current_time()
+def m_expired(mapping):
+    time = m_time(mapping)
+    return api.current_time() - time > TIME_TO_REMEMBER_ROUTE
 
 class RouteMap:
     """
@@ -59,6 +62,18 @@ class RouteMap:
             INSTANCE : {}
         }
         pass
+
+    def check_if_entries_expired(self):
+        """
+        Remove any routes that are expired.
+        """
+        for host in self.routes[INSTANCE]:
+            for port in self.routes:
+                if port not in self.connected_hosts() and port != INSTANCE:
+                    mapping = self.routes[port][host]
+                    if m_expired(mapping):
+                        mapping[kTime] = INFINITY # Set to infinity to 'expire'
+
 
     def received_route(self, port, host, latency):
         """
@@ -139,6 +154,22 @@ class RouteMap:
             new_entry[host] = m_mapping(distance=INFINITY, next_hop=port)
             self.delegate.route_update(host)
 
+    def remove_link(self, port):
+        """
+        When handle_link_down is called, we need to remove
+        the port from our routemap and send out the appropriate
+        updates.
+        """
+        del self.latencies[port]
+        del self.routes[port]
+
+        # If any mapping we have relies on the downed port,
+        # we need to try to find another route and notify
+        # our comrades
+        for host in self.routes[INSTANCE]:
+            mapping = self.routes[INSTANCE]
+            if m_next_hop(mapping) == port and self.update_route_for_host(host):
+                self.delegate.route_update(host)
 
     def latency(self, port):
         """
@@ -177,6 +208,10 @@ class RouteMap:
     def mapping_for_host(self, host):
         return self.routes[INSTANCE][host]
 
+    def update_hosts(self):
+        for host in self.routes[INSTANCE]:
+            self.delegate.route_update(host)
+
 class DVRouter (basics.DVRouterBase):
     NO_LOG = False # Set to True on an instance to disable its logging
     POISON_MODE = False # Can override POISON_MODE here
@@ -211,7 +246,7 @@ class DVRouter (basics.DVRouterBase):
         """
         if not self.NO_LOG:
             self.log("handle_link_down on %s (%s)" % (port, api.current_time()))
-        # self.route_map.remove_link(port, latency) # TODO:
+        self.route_map.remove_link(port)
 
     def handle_rx (self, packet, port):
         """
@@ -268,15 +303,9 @@ class DVRouter (basics.DVRouterBase):
         not be a bad place to check for whether any entries have expired.
         """
         # Check whether any entires have expired
-        self.check_if_entries_expired()
-        # Send tables to neighbors
-        self.send_tables_to_neighbors()
-
-    def check_if_entries_expired(self):
-        return
-
-    def send_tables_to_neighbors(self):
-        return
+        self.route_map.check_if_entries_expired()
+        # Call route update on each host
+        self.route_map.update_hosts()
 
     def route_update(self, host):
         """
@@ -296,4 +325,3 @@ class DVRouter (basics.DVRouterBase):
             else:
                 # Poisoned Route
                 self.send(route_packet, INSTANCE, flood=True)
-
