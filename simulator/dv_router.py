@@ -72,7 +72,7 @@ class RouteMap:
                 if port not in self.connected_hosts() and port != INSTANCE:
                     mapping = self.routes[port][host]
                     if m_expired(mapping):
-                        mapping[kTime] = INFINITY # Set to infinity to 'expire'
+                        mapping[kDistance] = INFINITY # Set to infinity to 'expire'
 
 
     def received_route(self, port, host, latency):
@@ -213,7 +213,7 @@ class RouteMap:
             self.delegate.route_update(host)
 
 class DVRouter (basics.DVRouterBase):
-    NO_LOG = False # Set to True on an instance to disable its logging
+    NO_LOG = True # Set to True on an instance to disable its logging
     POISON_MODE = False # Can override POISON_MODE here
     DEFAULT_TIMER_INTERVAL = 5 # Can override this yourself for testing
 
@@ -271,6 +271,7 @@ class DVRouter (basics.DVRouterBase):
             mapping = self.route_map.next_hop(host)
             if mapping == DESTINATION_NOT_FOUND:
                 self.send(packet, port, flood=True)
+                return
             next_hop = m_next_hop(mapping)
             if next_hop != port:
                 self.send(packet, next_hop)
@@ -305,7 +306,7 @@ class DVRouter (basics.DVRouterBase):
         # Check whether any entires have expired
         self.route_map.check_if_entries_expired()
         # Call route update on each host
-        self.route_map.update_hosts()
+        # self.route_map.update_hosts()
 
     def route_update(self, host):
         """
