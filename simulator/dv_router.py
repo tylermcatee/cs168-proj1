@@ -31,6 +31,8 @@ def m_mapping(distance, next_hop):
         kTime : api.current_time(),
     }
 def m_distance(mapping):
+    if m_expired(mapping):
+        return INFINITY # See if this gets me to pass some stuff
     return mapping[kDistance]
 def m_next_hop(mapping):
     return mapping[kNextHop]
@@ -89,13 +91,12 @@ class RouteMap:
         # Update change to neighbor's distance vector
         mapping = self.routes[port][host]
         mapping[kDistance] = latency
+        # Update this routes last refreshed time
+        m_update_time(mapping)
 
         # See if we have a new shorter path, if so update everyone
         if self.update_route_for_host(host):
             self.delegate.route_update(host)
-
-        # Update this routes last refreshed time
-        m_update_time(mapping)
 
 
     def update_route_for_host(self, host):
@@ -190,6 +191,17 @@ class RouteMap:
             if m_distance(mapping) == 1:
                 connected_hosts.append(m_next_hop(mapping))
         return connected_hosts
+
+    def connected_switches(self):
+        connected_switches = []
+        # Get the host to port mappings for ourself
+        host_to_port = self.routes[INSTANCE]
+        # Return all the next hops with distance 1
+        for mapping in host_to_port.values():
+            if m_distance(mapping) != 1:
+                if m_next_hop(mapping) not in connected_switches:
+                    connected_switches.append(m_next_hop(mapping))
+        return connected_switches
 
     def next_hop(self, host):
         """
@@ -306,7 +318,7 @@ class DVRouter (basics.DVRouterBase):
         # Check whether any entires have expired
         self.route_map.check_if_entries_expired()
         # Call route update on each host
-        # self.route_map.update_hosts()
+        self.route_map.update_hosts()
 
     def route_update(self, host):
         """
@@ -314,6 +326,7 @@ class DVRouter (basics.DVRouterBase):
         """
         mapping = self.route_map.mapping_for_host(host)
         route_packet = basics.RoutePacket(host, m_distance(mapping))
+
         if m_distance(mapping) < INFINITY:
             # Flood the packet
             self.send(route_packet, m_next_hop(mapping), flood=True)
@@ -325,4 +338,4 @@ class DVRouter (basics.DVRouterBase):
                 self.send(poison_packet, m_next_hop(mapping))
             else:
                 # Poisoned Route
-                self.send(route_packet, INSTANCE, flood=True)
+                self.send(route_packet, m_next_hop(mapping), flood=True)
